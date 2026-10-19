@@ -47,7 +47,7 @@ export function checkNodeEngine(range, current) {
 	if (!minimum) {
 		return `ENGINE_RANGE_INVALID: package.json engines.node must be a ">=X.Y.Z" range, got ${JSON.stringify(range)}.`;
 	}
-	if (minimum[0] < MIN_SUPPORTED_NODE_MAJOR) {
+	if (compareVersions(minimum, [MIN_SUPPORTED_NODE_MAJOR, 0, 0]) < 0) {
 		return `ENGINE_RANGE_TOO_LOW: engines.node ${JSON.stringify(range)} is below the Node ${MIN_SUPPORTED_NODE_MAJOR} floor.`;
 	}
 	const version = parseVersion(current);
