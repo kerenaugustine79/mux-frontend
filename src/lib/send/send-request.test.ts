@@ -95,6 +95,31 @@ describe("parseSendBody", () => {
 		expect(parseSendBody(validBody({ network: 1 }))).toBeNull();
 	});
 
+	it("accepts a well-formed lowercase network identifier", () => {
+		expect(parseSendBody(validBody({ network: "testnet" }))).not.toBeNull();
+		expect(parseSendBody(validBody({ network: "mainnet" }))).not.toBeNull();
+		expect(parseSendBody(validBody({ network: "futurenet" }))).not.toBeNull();
+	});
+
+	it("returns null for an empty network", () => {
+		expect(parseSendBody(validBody({ network: "" }))).toBeNull();
+	});
+
+	it("returns null for an uppercase network", () => {
+		expect(parseSendBody(validBody({ network: "TESTNET" }))).toBeNull();
+	});
+
+	it("returns null for an over-length network", () => {
+		// NETWORK_RE bounds the identifier to 32 characters.
+		expect(parseSendBody(validBody({ network: `a${"b".repeat(32)}` }))).toBeNull();
+	});
+
+	it("returns null for a network with disallowed characters", () => {
+		expect(parseSendBody(validBody({ network: "test net" }))).toBeNull();
+		expect(parseSendBody(validBody({ network: "test_net" }))).toBeNull();
+		expect(parseSendBody(validBody({ network: "1testnet" }))).toBeNull();
+	});
+
 	it("returns null when memo exceeds MAX_MEMO_BYTES", () => {
 		// MAX_MEMO_BYTES is 28; 29 ASCII bytes exceeds it.
 		expect(parseSendBody(validBody({ memo: "a".repeat(29) }))).toBeNull();

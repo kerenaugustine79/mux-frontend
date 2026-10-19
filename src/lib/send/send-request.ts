@@ -1,105 +1,99 @@
-import { SEND_GATE_CODES } from "@/lib/feature-flags/send-flows";
+import { createHash } from "node:crypto";
 
 /**
- * Typed contract for `POST /api/transactions/send` (issue #803): stable
- * error codes and strict body validation. Kept out of the route module
- * because Next.js route files may only export handlers and route config.
+ * Shared contract for the feature-flagged send entrypoint (issue #803).
+ *
+ * The route and its tests import these helpers so the client-facing body
+ * shape, validation rules, and error codes stay in one place.
  */
 
+export const MAX_BODY_BYTES = 8 * 1024;
+export const MAX_MEMO_BYTES = 28;
+
+export const WALLET_ID_RE = /^[A-Za-z0-9_-]{3,64}$/;
+export const DESTINATION_RE = /^[A-Z2-7]{56}$/;
+export const AMOUNT_RE = /^\d{1,18}(\.\d{1,7})?$/;
+export const ASSET_RE = /^[A-Za-z0-9]{1,12}$/;
+/**
+ * Accepted `network` identifiers: a short, lowercase, well-formed slug such
+ * as `testnet`, `mainnet`, or `futurenet`. Bounded to 3-32 characters so an
+ * arbitrarily long value cannot be forwarded to the backend.
+ */
+export const NETWORK_RE = /^[a-z][a-z0-9-]{2,31}$/;
+
 export const SEND_ERROR_CODES = {
-	...SEND_GATE_CODES,
-	UNAUTHORIZED: "SEND_UNAUTHORIZED",
-	AUTH_EXPIRED: "SEND_AUTH_EXPIRED",
-	FORBIDDEN: "SEND_FORBIDDEN",
-	DELEGATE_REVOKED: "SEND_DELEGATE_REVOKED",
-	INVALID_INPUT: "SEND_INVALID_INPUT",
-	IDEMPOTENCY_KEY_REQUIRED: "SEND_IDEMPOTENCY_KEY_REQUIRED",
-	IDEMPOTENCY_CONFLICT: "SEND_IDEMPOTENCY_CONFLICT",
-	REQUEST_IN_PROGRESS: "SEND_REQUEST_IN_PROGRESS",
-	RATE_LIMITED: "SEND_RATE_LIMITED",
-	MAINTENANCE: "SEND_MAINTENANCE",
-	BACKEND_UNAVAILABLE: "SEND_BACKEND_UNAVAILABLE",
-	UPSTREAM_ERROR: "SEND_UPSTREAM_ERROR",
+	UNAUTHORIZED: "UNAUTHORIZED",
+	FORBIDDEN: "FORBIDDEN",
+	RATE_LIMITED: "RATE_LIMITED",
+	IDEMPOTENCY_KEY_REQUIRED: "IDEMPOTENCY_KEY_REQUIRED",
+	INVALID_INPUT: "INVALID_INPUT",
+	REQUEST_IN_PROGRESS: "REQUEST_IN_PROGRESS",
+	BACKEND_UNAVAILABLE: "BACKEND_UNAVAILABLE",
 } as const;
 
 export type SendErrorCode =
 	(typeof SEND_ERROR_CODES)[keyof typeof SEND_ERROR_CODES];
 
 export interface SendRequestBody {
-	/** Source wallet id (not an address or key). */
+	/** 3-64 URL-safe characters. */
 	walletId: string;
-	/** Stellar StrKey account (G…) or contract (C…) address. */
+	/** 56-character Stellar account address (base32). */
 	destination: string;
-	/** Positive decimal string with at most 7 fractional digits. */
+	/** Decimal amount, up to 18 integer and 7 fractional digits. */
 	amount: string;
-	/** "native" or CODE:ISSUER. */
+	/** 1-12 alphanumeric asset code. */
 	asset: string;
+	/**
+	 * Network identifier: a short, lowercase slug matching
+	 * `/^[a-z][a-z0-9-]{2,31}$/` (e.g. `testnet`, `mainnet`, `futurenet`).
+	 */
 	network: string;
+	/** Optional memo, at most 28 UTF-8 bytes. */
 	memo?: string;
 }
 
-export const MAX_BODY_BYTES = 4 * 1024;
-const ALLOWED_KEYS = new Set([
-	"walletId",
-	"destination",
-	"amount",
-	"asset",
-	"network",
-	"memo",
-]);
-const WALLET_ID_RE = /^[A-Za-z0-9_-]{3,64}$/;
-const DESTINATION_RE = /^[GC][A-Z2-7]{55}$/;
-const AMOUNT_RE = /^(0|[1-9]\d{0,11})(\.\d{1,7})?$/;
-const ASSET_RE = /^(native|[A-Za-z0-9]{1,12}:G[A-Z2-7]{55})$/;
-const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9_-]{16,128}$/;
-const NETWORK_RE = /^[a-z0-9-]{1,32}$/i;
-const MAX_MEMO_BYTES = 28;
+export function isValidIdempotencyKey(key: string): boolean {
+	return /^[A-Za-z0-9_-]{16,128}$/.test(key);
+}
 
-export function isValidIdempotencyKey(value: string): boolean {
-	return IDEMPOTENCY_KEY_RE.test(value);
+function memoByteLength(memo: string): number {
+	return new TextEncoder().encode(memo).length;
 }
 
 export function parseSendBody(raw: unknown): SendRequestBody | null {
-	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-		return null;
-	}
-	// Reject oversized bodies before any further validation (fail closed on
-	// size before we ever inspect field contents).
-	if (new TextEncoder().encode(JSON.stringify(raw)).length > MAX_BODY_BYTES) {
-		return null;
-	}
-	const body = raw as Record<string, unknown>;
-	if (Object.keys(body).some((key) => !ALLOWED_KEYS.has(key))) return null;
+	if (typeof raw !== "object" || raw === null) return null;
+	const input = raw as Record<string, unknown>;
 
-	const { walletId, destination, amount, asset, network, memo } = body;
+	const { walletId, destination, amount, asset, network, memo } = input;
+
 	if (typeof walletId !== "string" || !WALLET_ID_RE.test(walletId)) {
 		return null;
 	}
 	if (typeof destination !== "string" || !DESTINATION_RE.test(destination)) {
 		return null;
 	}
-	if (
-		typeof amount !== "string" ||
-		!AMOUNT_RE.test(amount) ||
-		Number(amount) <= 0
-	) {
+	if (typeof amount !== "string" || !AMOUNT_RE.test(amount)) {
 		return null;
 	}
-	if (typeof asset !== "string" || !ASSET_RE.test(asset)) return null;
-	if (typeof network !== "string" || !NETWORK_RE.test(network)) return null;
-	if (
-		memo !== undefined &&
-		(typeof memo !== "string" ||
-			new TextEncoder().encode(memo).length > MAX_MEMO_BYTES)
-	) {
+	if (typeof asset !== "string" || !ASSET_RE.test(asset)) {
 		return null;
 	}
-	return {
-		walletId,
-		destination,
-		amount,
-		asset,
-		network,
-		...(memo === undefined ? {} : { memo }),
-	};
+	if (typeof network !== "string" || !NETWORK_RE.test(network)) {
+		return null;
+	}
+
+	const body: SendRequestBody = { walletId, destination, amount, asset, network };
+
+	if (memo !== undefined) {
+		if (typeof memo !== "string" || memoByteLength(memo) > MAX_MEMO_BYTES) {
+			return null;
+		}
+		body.memo = memo;
+	}
+
+	return body;
+}
+
+export function hashSendBody(body: SendRequestBody): string {
+	return createHash("sha256").update(JSON.stringify(body)).digest("hex");
 }
