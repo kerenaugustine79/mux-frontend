@@ -57,6 +57,24 @@ export function credentialFingerprintSource(request: Request): string {
 }
 
 /**
+ * Best-effort client IP for rate-limit keying. Returns the first
+ * `x-forwarded-for` entry, then `x-real-ip`, or `null` when neither header is
+ * present (e.g. a direct connection to the Next.js server). Callers must
+ * handle the `null` case explicitly rather than collapsing onto a shared
+ * sentinel — see `callerKey` in `rate-limiter.ts`.
+ */
+export function clientIp(request: Request): string | null {
+	const forwarded = request.headers.get("x-forwarded-for");
+	if (forwarded) {
+		const first = forwarded.split(",")[0]?.trim();
+		if (first) return first;
+	}
+	const realIp = request.headers.get("x-real-ip")?.trim();
+	if (realIp) return realIp;
+	return null;
+}
+
+/**
  * CSRF guard for cookie-authenticated writes. Requests carrying an explicit
  * Authorization/API-key header are not ambient credentials and pass; a
  * cookie-only request must present an Origin matching this app's origin.

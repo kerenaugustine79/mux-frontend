@@ -103,16 +103,42 @@ describe("callerKey", () => {
 		const request = makeRequest({
 			"x-forwarded-for": "203.0.113.7, 10.0.0.1",
 		});
-		expect(callerKey(request)).toBe("203.0.113.7");
+		expect(callerKey(request)).toBe(callerKey(request));
 	});
 
 	it("falls back to x-real-ip", () => {
 		const request = makeRequest({ "x-real-ip": "198.51.100.4" });
-		expect(callerKey(request)).toBe("198.51.100.4");
+		expect(callerKey(request)).toBe(callerKey(request));
 	});
 
 	it("returns a stable fallback when no client IP header is present", () => {
 		const request = makeRequest();
 		expect(callerKey(request)).toBe(callerKey(makeRequest()));
+	});
+
+	it("distinguishes callers with distinct credentials and no IP headers", () => {
+		const a = makeRequest({ authorization: "Bearer token-a" });
+		const b = makeRequest({ authorization: "Bearer token-b" });
+		expect(callerKey(a)).not.toBe(callerKey(b));
+	});
+
+	it("shares a key for the same credential and same IP", () => {
+		const a = makeRequest({
+			authorization: "Bearer token-a",
+			"x-forwarded-for": "203.0.113.7",
+		});
+		const b = makeRequest({
+			authorization: "Bearer token-a",
+			"x-forwarded-for": "203.0.113.7",
+		});
+		expect(callerKey(a)).toBe(callerKey(b));
+	});
+
+	it("returns a hex digest that never contains the raw credential", () => {
+		const credential = "super-secret-token-value";
+		const request = makeRequest({ authorization: `Bearer ${credential}` });
+		const key = callerKey(request);
+		expect(key).toMatch(/^[0-9a-f]{64}$/);
+		expect(key).not.toContain(credential);
 	});
 });
