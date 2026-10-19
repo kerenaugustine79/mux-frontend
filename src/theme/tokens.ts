@@ -25,9 +25,15 @@ export const themes = {
 export type ThemeName = keyof typeof themes;
 export type ThemeTokens = { [K in keyof (typeof themes)["light"]]: string };
 
-/** Maps tokens to CSS custom properties, e.g. `--mux-background`. */
+/**
+ * Maps tokens to CSS custom properties, e.g. `--mux-background`.
+ *
+ * Fails closed: an unknown theme name (e.g. from a `?theme=` query param or a
+ * `localStorage` value) returns an empty map instead of throwing a `TypeError`.
+ */
 export function themeCssVars(name: ThemeName): Record<string, string> {
 	const vars: Record<string, string> = {};
+	if (!Object.hasOwn(themes, name)) return vars;
 	for (const [key, value] of Object.entries(themes[name]))
 		vars[`--mux-${key}`] = value;
 	return vars;

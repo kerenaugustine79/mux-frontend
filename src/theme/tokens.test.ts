@@ -31,6 +31,14 @@ describe("theme tokens", () => {
 		}
 	});
 
+	it.each(THEME_NAMES)(
+		"%s: returned keys are exactly the prefixed token keys",
+		(name) => {
+			const expected = Object.keys(themes[name]).map((k) => `--mux-${k}`);
+			expect(Object.keys(themeCssVars(name)).sort()).toEqual(expected.sort());
+		},
+	);
+
 	it.each(THEME_NAMES)("%s: maps every token to its value", (name) => {
 		const vars = themeCssVars(name);
 		const tokens: Record<string, string> = themes[name];
@@ -53,4 +61,10 @@ describe("theme tokens", () => {
 			expect(themeCssVars(name)).not.toBe(themeCssVars(name));
 		},
 	);
+
+	it("returns an empty map for an unknown theme name", () => {
+		const unknown = "solarized" as ThemeName;
+		expect(() => themeCssVars(unknown)).not.toThrow(TypeError);
+		expect(themeCssVars(unknown)).toEqual({});
+	});
 });
